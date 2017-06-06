@@ -25,6 +25,8 @@ unit Vcl.Styles.NSIS;
 
 interface
 
+{$DEFINE HookFileDialogs}
+
 uses
   System.Types,
   System.SysUtils,
@@ -111,16 +113,26 @@ type
     constructor Create(AHandle: THandle); override;
   end;
 
+  TNSISTreeViewStyleHook = class (TMouseTrackSysControlStyleHook)
+  protected
+    procedure UpdateColors; override;
+    procedure WndProc(var Message: TMessage); override;
+    function GetBorderSize: TRect; override;
+  public
+    constructor Create(AHandle: THandle); override;
+  end;
+
 var
   NSIS_IgnoredControls: TList<HWND>;
 
 implementation
 
 uses
-  //IOutils,
+  Winapi.CommCtrl,
   DDetours,
   Winapi.CommDlg,
-  Vcl.Styles.Utils.SysControls;
+  Vcl.Styles.Utils.Graphics,
+  Vcl.Styles.Utils.SysControls, uLogExcept;
 
 type
   TThemedNSISControls = class
@@ -148,6 +160,58 @@ procedure Addlog(const Msg: string);
 begin
   //TFile.AppendAllText('C:\Test\log.txt', Format('%s %s %s', [FormatDateTime('hh:nn:ss.zzz', Now), Msg, sLineBreak]));
 end;
+
+
+constructor TNSISTreeViewStyleHook.Create(AHandle: THandle);
+begin
+  inherited;
+  OverrideEraseBkgnd:=True;
+  OverridePaintNC := True;
+  OverrideFont := True;
+  HookedDirectly := True;
+end;
+
+procedure TNSISTreeViewStyleHook.UpdateColors;
+begin
+  //TLogFile.Add('TFolderTreeViewStyleHook.UpdateColors');
+  inherited;
+  if OverrideEraseBkgnd then
+    Color := StyleServices.GetStyleColor(scTreeView)
+  else
+    Color := clWhite;
+
+  if OverrideFont then
+    FontColor := StyleServices.GetSystemColor(clWindowText)
+  else
+    FontColor := clWindowText;
+end;
+
+procedure TNSISTreeViewStyleHook.WndProc(var Message: TMessage);
+begin
+  case Message.Msg of
+    WM_ERASEBKGND:
+      begin
+        UpdateColors;
+        if (Longint(TreeView_GetBkColor(Handle))<>ColorToRGB(Color)) then
+          TreeView_SetBkColor(Handle, ColorToRGB(Color));
+
+        if (Longint(TreeView_GetTextColor(Handle))<>ColorToRGB(FontColor)) then
+         TreeView_SetTextColor(Handle, ColorToRGB(FontColor));
+
+        //Message.Result := CallDefaultProc(Message);
+        //Exit;
+      end;
+  end;
+
+  inherited;
+end;
+
+function TNSISTreeViewStyleHook.GetBorderSize: TRect;
+begin
+  if SysControl.HasBorder then
+    Result := Rect(2, 2, 2, 2);
+end;
+
 
 { TTransparentStaticNSIS }
 
@@ -551,6 +615,8 @@ if Assigned(ThemedNSISControls) then
   end;
 end;
 
+{$IFDEF HookFileDialogs}
+
 const
   commdlg32 = 'comdlg32.dll';
 
@@ -619,8 +685,75 @@ begin
   InterceptRemove(@TrampolineGetSaveFileNameA);
 end;
 
+{$ENDIF}
+
+var
+
+Trampoline_LoadBitmapA :  function (hInstance: HINST; lpBitmapName: PAnsiChar): HBITMAP; stdcall;
+
+
+function Detour_LoadBitmapA(hInstance: HINST; lpBitmapName: PAnsiChar): HBITMAP; stdcall;
+var
+  LBitMap   : TBitmap;
+  LRect     : TRect;
+  LSize     : TSize;
+begin
+
+  if  IS_INTRESOURCE(PChar(lpBitmapName)) then
+  case Integer(lpBitmapName) of
+    110 :  begin
+             LBitMap:=TBitmap.Create;
+             try
+               //LBitmap.Handle := Result;
+               LBitMap.SetSize(16 * 6, 16);
+               LBitMap.PixelFormat := pf8bit;
+               StyleServices.GetElementSize(LBitMap.Canvas.Handle, StyleServices.GetElementDetails(tbCheckBoxUncheckedNormal), TElementSize.esMinimum, LSize);
+               if (LSize.Width>=16) or (LSize.Height>=16) then
+                LBitMap.Canvas.Brush.Color:= StyleServices.GetSystemColor(clWindow)
+               else
+                LBitMap.Canvas.Brush.Color:=clFuchsia;
+
+               //LBitMap.TransparentColor := clFuchsia;
+
+               LRect := Rect(0, 0, LBitMap.Width, LBitMap.Height);
+               LBitMap.Canvas.FillRect(LRect);
+
+
+               LRect := Rect(0, 1, 16, 15);
+               OffsetRect(LRect, 16, 0);
+               DrawStyleElement(LBitMap.Canvas.Handle, StyleServices.GetElementDetails(tbCheckBoxUncheckedNormal), LRect);
+
+               OffsetRect(LRect, 16, 0);
+               DrawStyleElement(LBitMap.Canvas.Handle, StyleServices.GetElementDetails(tbCheckBoxCheckedNormal), LRect);
+
+               OffsetRect(LRect, 16, 0);
+               DrawStyleElement(LBitMap.Canvas.Handle, StyleServices.GetElementDetails(tbCheckBoxCheckedDisabled), LRect);
+
+               OffsetRect(LRect, 16, 0);
+               DrawStyleElement(LBitMap.Canvas.Handle, StyleServices.GetElementDetails(tbCheckBoxUncheckedDisabled), LRect);
+
+               OffsetRect(LRect, 16, 0);
+               DrawStyleElement(LBitMap.Canvas.Handle, StyleServices.GetElementDetails(tbCheckBoxCheckedDisabled), LRect);
+
+               //LBitMap.SaveToFile(Format('C:\Dephi\github\vcl-styles-plugins\NSIS plugin\Scripts\Modern UI\check_%dx%d.bmp', [LSize.Width, LSize.Height]));
+
+               Exit(LBitMap.Handle);
+             finally
+               LBitmap.ReleaseHandle;
+               LBitMap.Free;
+             end;
+           end;
+  end;
+
+  Result:= Trampoline_LoadBitmapA(hInstance, lpBitmapName);
+end;
+
+
+
 initialization
+{$IFDEF HookFileDialogs}
   HookFileDialogs;
+{$ENDIF}
   NSIS_IgnoredControls := TList<HWND>.Create;
   TSysStyleManager.OnBeforeHookingControl := @BeforeNSISHookingControl;
   TSysStyleManager.OnHookNotification := @HookNotificationNSIS;
@@ -629,9 +762,15 @@ initialization
   if StyleServices.Available then
    ThemedNSISControls := TThemedNSISControls.Create;
 
+  @Trampoline_LoadBitmapA := InterceptCreate(user32, 'LoadBitmapA', @Detour_LoadBitmapA);
+
+
 finalization
+{$IFDEF HookFileDialogs}
    UnHookFileDialogs;
+{$ENDIF}
    Done;
    NSIS_IgnoredControls.Free;
+   InterceptRemove(@Trampoline_LoadBitmapA);
 
 end.

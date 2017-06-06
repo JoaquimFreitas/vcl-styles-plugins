@@ -32,6 +32,7 @@ library NSISVCLStyles;
 {$SetPEFlags $2000}
 uses
   System.SysUtils,
+  Winapi.CommCtrl,
   WinApi.Windows,
   Vcl.Themes,
   Vcl.Styles,
@@ -47,8 +48,11 @@ uses
   Vcl.Styles.UxTheme in '..\Common\Vcl.Styles.UxTheme.pas',
   Vcl.Styles.Utils.Graphics in '..\Common\Vcl.Styles.Utils.Graphics.pas',
   nsis in 'nsis.pas',
+  CPUID in '..\Common\delphi-detours-library\CPUID.pas',
   DDetours in '..\Common\delphi-detours-library\DDetours.pas',
-  InstDecode in '..\Common\delphi-detours-library\InstDecode.pas';
+  GenericsCast in '..\Common\delphi-detours-library\GenericsCast.pas',
+  InstDecode in '..\Common\delphi-detours-library\InstDecode.pas',
+  uLogExcept in 'uLogExcept.pas';
 
 //NSIS Scripting Reference
   //http://nsis.sourceforge.net/Docs/Chapter4.html
@@ -96,6 +100,10 @@ end;
    begin
      TStyleManager.SetStyle(TStyleManager.LoadFromFile(String(VCLStyleFile)));
 
+
+     TSysStyleManager.UnRegisterSysStyleHook(WC_TREEVIEW, TSysDialogStyleHook);
+     TSysStyleManager.RegisterSysStyleHook(WC_TREEVIEW, TNSISTreeViewStyleHook);
+
           {
      TSysDialogStyleHookBackground.MergeImages := True;
      TSysDialogStyleHookBackground.SharedImageLocation := 'C:\Delphi\google-code\vcl-styles-utils\NSIS plugin\background.png';
@@ -110,7 +118,7 @@ end;
          }
    end
    else
-   MessageBox(hwndParent, 'Error', PChar(Format('The Style File %s is not valid',[VCLStyleFile])), MB_OK);
+   MessageBox(hwndParent, PChar(Format('The Style File %s is not valid',[VCLStyleFile])), 'Error', MB_OK);
  end;
 
  procedure RemoveStyleNCArea(const hwndParent: HWND; const string_size: integer; const variables: PAnsiChar; const stacktop: pointer; const extraparameters: pointer = nil); cdecl;
@@ -163,9 +171,14 @@ end;
    VCLStyleFile:=PChar(PopStringW());
 
    if TStyleManager.IsValidStyle(String(VCLStyleFile)) then
-     TStyleManager.SetStyle(TStyleManager.LoadFromFile(String(VCLStyleFile)))
+   begin
+     TStyleManager.SetStyle(TStyleManager.LoadFromFile(String(VCLStyleFile)));
+
+     TSysStyleManager.UnRegisterSysStyleHook(WC_TREEVIEW, TSysDialogStyleHook);
+     TSysStyleManager.RegisterSysStyleHook(WC_TREEVIEW, TNSISTreeViewStyleHook);
+   end
    else
-   MessageBox(hwndParent,'Error', PChar(Format('The Style File %s is not valid',[VCLStyleFile])), MB_OK);
+   MessageBox(hwndParent, PChar(Format('The Style File %s is not valid',[VCLStyleFile])), 'Error', MB_OK);
  end;
 
  procedure RemoveStyleNCArea(const hwndParent: HWND; const string_size: integer; const variables: PChar; const stacktop: pointer; const extraparameters: pointer = nil); cdecl;
